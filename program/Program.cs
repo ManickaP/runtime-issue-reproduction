@@ -1,25 +1,35 @@
 ﻿// See https://aka.ms/new-console-template for more information
+using System.Buffers;
 using System.Net;
+using System.Net.ServerSentEvents;
 using System.Runtime.CompilerServices;
+using System.Text;
+using System.Text.Unicode;
 
-Console.WriteLine("Hello, World!");
-if (IPAddress.IsValid("10.0.0.1"))
+var stream = new MemoryStream();
+await SseFormatter.WriteAsync<int>(GetItems(), stream, (item, writer) =>
 {
-    Console.WriteLine("1");
+    writer.Write(Encoding.UTF8.GetBytes(item.Data.ToString()));
+});
+
+Console.WriteLine(Encoding.UTF8.GetString(stream.GetBuffer()));
+
+stream.Seek(0, SeekOrigin.Begin);
+
+var parser = SseParser.Create(stream, (type, data) =>
+{
+    var str = Encoding.UTF8.GetString(data);
+    return Int32.Parse(str);
+});
+await foreach (var item in parser.EnumerateAsync())
+{
+    Console.WriteLine($"{item.EventType}: {item.Data} {item.EventId} {item.ReconnectionInterval} [{parser.LastEventId};{parser.ReconnectionInterval}]");
 }
-if (IPAddress.IsValid("::1"))
+
+static async IAsyncEnumerable<SseItem<int>> GetItems()
 {
-    Console.WriteLine("2");
-}
-if (IPAddress.IsValid("10.0.1"))
-{
-    Console.WriteLine("3");
-}
-if (IPAddress.IsValid("::192.168.0.1"))
-{
-    Console.WriteLine("4");
-}
-if (IPAddress.IsValid("fe80::9656:d028:8652:66b6"))
-{
-    Console.WriteLine("5");
+    yield return new SseItem<int>(1) { ReconnectionInterval = TimeSpan.FromSeconds(1) };
+    yield return new SseItem<int>(2);
+    yield return new SseItem<int>(3);
+    yield return new SseItem<int>(4);
 }
