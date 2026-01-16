@@ -8,19 +8,40 @@ using OpenTelemetry.Trace;
 var builder = WebApplication.CreateBuilder(args);
 
 // Custom metrics for the application
-var meter = new Meter("OTel.Example", "1.0.0");
-var counter = meter.CreateCounter<int>("count");
+var greeterMeter = new Meter("OTel.Example", "1.0.0");
+var countGreetings = greeterMeter.CreateCounter<int>("greetings.count", description: "Counts the number of greetings");
 
 // Custom ActivitySource for the application
-var counterActivitySource = new ActivitySource("OTel.Example");
+var greeterActivitySource = new ActivitySource("OTel.Example");
+
+// Setup logging to be exported via OpenTelemetry
+builder.Logging.AddOpenTelemetry(logging =>
+{
+    logging.IncludeFormattedMessage = true;
+    logging.IncludeScopes = true;
+});
 
 var otel = builder.Services.AddOpenTelemetry();
 
+// Add Metrics for ASP.NET Core and our custom metrics and export via OTLP
 otel.WithMetrics(metrics =>
 {
-    metrics.AddMeter(meter.Name).AddView(
-        instrumentName: counter.Name,
-        new MetricStreamConfiguration { CardinalityLimit = 10 });
+    // Metrics provider from OpenTelemetry
+    metrics.AddAspNetCoreInstrumentation();
+    //Our custom metrics
+    metrics.AddMeter(greeterMeter.Name);
+    // Metrics provides by ASP.NET Core in .NET 8
+    metrics.AddMeter("Microsoft.AspNetCore.Hosting");
+    metrics.AddMeter("Microsoft.AspNetCore.Server.Kestrel");
+    metrics.AddMeter("System.Net.Http");
+});
+
+// Add Tracing for ASP.NET Core and our custom ActivitySource and export via OTLP
+otel.WithTracing(tracing =>
+{
+    tracing.AddAspNetCoreInstrumentation();
+    tracing.AddHttpClientInstrumentation();
+    tracing.AddSource(greeterActivitySource.Name);
 });
 
 // Export OpenTelemetry data via OTLP, using env vars for the configuration
@@ -32,16 +53,27 @@ if (OtlpEndpoint != null)
 
 var app = builder.Build();
 
-int tag = 0;
+app.MapGet("/", SendGreeting);
 
-app.MapGet("/", StartCounter);
-async Task<string> StartCounter()
+async Task<string> SendGreeting(ILogger<Program> logger)
 {
-    for (int i = 0; i < 20; ++i) {
-        TagList tags = default;
-        tags.Add("tag", $"value={Interlocked.Increment(ref tag)}");
-        counter.Add(1, tags);
-    }
+    // Create a new Activity scoped to the method
+    using var activity = greeterActivitySource.StartActivity("GreeterActivity");
+
+    // Log a message
+    logger.LogInformation("Sending greeting");
+
+    // Increment the custom counter
+    countGreetings.Add(1);
+
+    // Add a tag to the Activity
+    activity?.SetTag("greeting", "Hello World!");
+
+    using var client = new HttpClient();
+
+
+    logger.LogInformation((await client.GetAsync("https://example.com")).ToString());
+
     return "Hello World!";
 }
 app.Run();
