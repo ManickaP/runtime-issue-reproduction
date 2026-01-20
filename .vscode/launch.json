@@ -110,6 +110,27 @@
                 }
             }
         }, {
+            "name": "test-metrics",
+            "type": "coreclr",
+            "request": "launch",
+            "program": "${workspaceFolder}/test-metrics/bin/Debug/net10.0/test-metrics.dll",
+            "args": [],
+            "cwd": "${workspaceFolder}/test-metrics",
+            "console": "internalConsole",
+            "stopAtEntry": false,
+            "justMyCode": false,
+            "requireExactSource": false,
+            "suppressJITOptimizations": true,
+            "enableStepFiltering": false,
+            "symbolOptions": {
+                "searchMicrosoftSymbolServer": true,
+                "searchNuGetOrgSymbolServer": true,
+                "moduleFilter": {
+                    "mode": "loadAllButExcluded",
+                    "excludedModules": []
+                }
+            },
+        }, {
             "name": ".NET Core Attach",
             "type": "coreclr",
             "request": "attach"

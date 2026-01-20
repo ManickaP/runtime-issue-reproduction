@@ -1,79 +1,96 @@
+using System.Collections.Concurrent;
 using System.Diagnostics;
+using System.Diagnostics.CodeAnalysis;
 using System.Diagnostics.Metrics;
 using OpenTelemetry;
 using OpenTelemetry.Metrics;
 using OpenTelemetry.Trace;
 
 
+var counterValues = new ConcurrentDictionary<counterKey, int>();
+
 var builder = WebApplication.CreateBuilder(args);
 
 // Custom metrics for the application
-var greeterMeter = new Meter("OTel.Example", "1.0.0");
-var countGreetings = greeterMeter.CreateCounter<int>("greetings.count", description: "Counts the number of greetings");
+var meter = new Meter("OTel.Example", "1.0.0");
+var counter = meter.CreateObservableCounter<int>("count", GetCounters);
+
+IEnumerable<Measurement<int>> GetCounters()
+{
+    foreach (var counter in counterValues)
+    {
+        if (counter.Value > 0)
+        {
+            yield return new Measurement<int>(counter.Value, counter.Key.TagList);
+        }
+    }
+}
 
 // Custom ActivitySource for the application
-var greeterActivitySource = new ActivitySource("OTel.Example");
-
-// Setup logging to be exported via OpenTelemetry
-builder.Logging.AddOpenTelemetry(logging =>
-{
-    logging.IncludeFormattedMessage = true;
-    logging.IncludeScopes = true;
-});
+var counterActivitySource = new ActivitySource("OTel.Example");
 
 var otel = builder.Services.AddOpenTelemetry();
 
-// Add Metrics for ASP.NET Core and our custom metrics and export via OTLP
 otel.WithMetrics(metrics =>
 {
-    // Metrics provider from OpenTelemetry
-    metrics.AddAspNetCoreInstrumentation();
-    //Our custom metrics
-    metrics.AddMeter(greeterMeter.Name);
-    // Metrics provides by ASP.NET Core in .NET 8
-    metrics.AddMeter("Microsoft.AspNetCore.Hosting");
-    metrics.AddMeter("Microsoft.AspNetCore.Server.Kestrel");
-    metrics.AddMeter("System.Net.Http");
+    metrics.AddMeter(meter.Name).AddView(
+        instrumentName: counter.Name,
+        new MetricStreamConfiguration() /*{ CardinalityLimit = 10 }*/ );
+    metrics.AddConsoleExporter(/*(_, options) =>
+    {
+        options.TemporalityPreference = MetricReaderTemporalityPreference.Delta;
+    }*/);
 });
-
-// Add Tracing for ASP.NET Core and our custom ActivitySource and export via OTLP
-otel.WithTracing(tracing =>
-{
-    tracing.AddAspNetCoreInstrumentation();
-    tracing.AddHttpClientInstrumentation();
-    tracing.AddSource(greeterActivitySource.Name);
-});
-
-// Export OpenTelemetry data via OTLP, using env vars for the configuration
-var OtlpEndpoint = builder.Configuration["OTEL_EXPORTER_OTLP_ENDPOINT"];
-if (OtlpEndpoint != null)
-{
-    otel.UseOtlpExporter();
-}
 
 var app = builder.Build();
 
-app.MapGet("/", SendGreeting);
+int tag = 0;
 
-async Task<string> SendGreeting(ILogger<Program> logger)
+app.MapGet("/", StartCounter);
+async Task<string> StartCounter()
 {
-    // Create a new Activity scoped to the method
-    using var activity = greeterActivitySource.StartActivity("GreeterActivity");
-
-    // Log a message
-    logger.LogInformation("Sending greeting");
-
-    // Increment the custom counter
-    countGreetings.Add(1);
-
-    // Add a tag to the Activity
-    activity?.SetTag("greeting", "Hello World!");
-
-    using var client = new HttpClient();
-
-
-    logger.LogInformation((await client.GetAsync("https://example.com")).ToString());
+    for (int i = tag - 15; i >= 0 && i <= tag; ++i){
+        var key = new counterKey($"value={i}");
+        if (counterValues.AddOrUpdate(key, (key) => {
+            Debug.Assert(false, $"The {key} must be present in the dictionary");
+            return -1;
+        }, (key, val) => val - 1) == 0)
+        {
+            var removed = counterValues.TryRemove(key, out int value);
+            Debug.Assert(removed);
+            Debug.Assert(value == 0);
+        }
+    }
+    for (int i = 0; i < 20; ++i) {
+        var key = new counterKey($"value={Interlocked.Increment(ref tag)}");
+        counterValues.AddOrUpdate(key, 1, (key, val) => val + 1);
+    }
 
     return "Hello World!";
 }
 app.Run();
+
+struct counterKey : IEquatable<counterKey>
+{
+    public readonly string TagValue;
+
+    public counterKey(string tagValue)
+    {
+        TagValue = tagValue;
+    }
+
+    public bool Equals(counterKey other)
+        => TagValue.Equals(other.TagValue);
+
+    public override bool Equals([NotNullWhen(true)] object? obj)
+        => obj is counterKey ck ? Equals(ck) : false;
+
+    public override int GetHashCode()
+        => TagValue.GetHashCode();
+
+    public TagList TagList
+        => new TagList()
+        {
+            { "tag", TagValue }
+        };
+}
