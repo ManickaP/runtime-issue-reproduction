@@ -9,7 +9,7 @@ using System.Text;
 
 internal partial class Program
 {
-    private static async Task Main(string[] args)
+    private static async Task Main_(string[] args)
     {
         //using var quicListener = new QuicEventListener();
 

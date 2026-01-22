@@ -6,7 +6,7 @@ using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Unicode;
 
-var stream = new MemoryStream();
+/*var stream = new MemoryStream();
 
 await SseFormatter.WriteAsync<int>(GetItems(), stream, (item, writer) =>
 {
@@ -32,4 +32,13 @@ static async IAsyncEnumerable<SseItem<int>> GetItems()
     yield return new SseItem<int>(2) { EventId = "2" };
     yield return new SseItem<int>(3);
     yield return new SseItem<int>(4);
+}*/
+
+Console.WriteLine(Environment.ProcessId);
+
+var c = new HttpClient();
+while (true)
+{
+    Console.WriteLine(await c.GetAsync("https://github.com"));
+    await Task.Delay(2_000);
 }

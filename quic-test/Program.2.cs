@@ -8,7 +8,7 @@ using System.Text;
 
 internal partial class Program
 {
-    private static async Task Main_(string[] args)
+    private static async Task Main_2(string[] args)
     {
         using var quicListener = new QuicEventListener();
 
