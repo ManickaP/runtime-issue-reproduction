@@ -1,6 +1,5 @@
 using System.Net;
 using System.Net.Sockets;
-using System.Text;
 
 // Start a TCP listener on a random port.
 using var listener = new TcpListener(IPAddress.Loopback, 0);
@@ -19,31 +18,60 @@ Console.WriteLine("Client connected");
 using var serverSocket = await acceptTask;
 Console.WriteLine("Server accepted connection");
 
-// Shutdown the client's SEND side (half-close).
-// The socket is still alive and not disposed, but writing is no longer allowed.
-clientSocket.Shutdown(SocketShutdown.Send);
-Console.WriteLine("Client shut down the sending side");
+// Wrap the client socket in a write-only NetworkStream (simulating a unidirectional stream).
+using var writeOnlyStream = new NetworkStream(clientSocket, FileAccess.Write);
+Console.WriteLine("Created write-only NetworkStream");
 
-// Now try to write on the client socket whose write side is closed.
+// Now try to read from the write-only stream using different methods.
+// Per dotnet/runtime#121620, ReadByte and CopyTo throw different exception types.
+
+Console.WriteLine();
+Console.WriteLine("--- ReadByte ---");
 try
 {
-    byte[] data = Encoding.UTF8.GetBytes("Hello after shutdown");
-    int sent = await clientSocket.SendAsync(data, SocketFlags.None);
-    Console.WriteLine($"Unexpectedly sent {sent} bytes");
-}
-catch (SocketException ex)
-{
-    Console.WriteLine($"SocketException on send: {ex.SocketErrorCode} — {ex.Message}");
-    Console.WriteLine($"  {ex}");
+    writeOnlyStream.ReadByte();
+    Console.WriteLine("Unexpectedly succeeded");
 }
 catch (Exception ex)
 {
-    Console.WriteLine($"Exception on send: {ex.GetType().Name} — {ex.Message}");
+    Console.WriteLine($"{ex.GetType().Name}: {ex.Message}");
 }
 
-// Also show that reading on the server side sees EOF (0 bytes) because the client closed its send side.
-byte[] buf = new byte[1024];
-int read = await serverSocket.ReceiveAsync(buf, SocketFlags.None);
-Console.WriteLine($"Server received {read} bytes (0 = EOF as expected)");
+Console.WriteLine();
+Console.WriteLine("--- CopyTo ---");
+try
+{
+    writeOnlyStream.CopyTo(new MemoryStream());
+    Console.WriteLine("Unexpectedly succeeded");
+}
+catch (Exception ex)
+{
+    Console.WriteLine($"{ex.GetType().Name}: {ex.Message}");
+}
 
+Console.WriteLine();
+Console.WriteLine("--- Read ---");
+try
+{
+    writeOnlyStream.Read(new byte[1024], 0, 1024);
+    Console.WriteLine("Unexpectedly succeeded");
+}
+catch (Exception ex)
+{
+    Console.WriteLine($"{ex.GetType().Name}: {ex.Message}");
+}
+
+Console.WriteLine();
+Console.WriteLine("--- ReadAsync ---");
+try
+{
+    await writeOnlyStream.ReadAsync(new byte[1024]);
+    Console.WriteLine("Unexpectedly succeeded");
+}
+catch (Exception ex)
+{
+    Console.WriteLine($"{ex.GetType().Name}: {ex.Message}");
+}
+
+Console.WriteLine();
 Console.WriteLine("Done");
